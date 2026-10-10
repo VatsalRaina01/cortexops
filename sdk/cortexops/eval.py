@@ -168,6 +168,11 @@ class EvalSuite:
                     judge=c.get("judge", "rule"),
                     judge_criteria=c.get("judge_criteria"),
                     tags=c.get("tags", []),
+                    safety_checks=c.get("safety_checks") or [],
+                    forbidden_tool_calls=c.get("forbidden_tool_calls") or [],
+                    max_tool_calls=c.get("max_tool_calls"),
+                    allowed_domains=c.get("allowed_domains"),
+                    sensitive_markers=c.get("sensitive_markers") or [],
                 )
             )
         return EvalDataset(

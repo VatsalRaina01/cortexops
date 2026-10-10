@@ -18,8 +18,10 @@ from .metrics import (
     HallucinationMetric,
     LatencyMetric,
     Metric,
+    PromptInjectionMetric,
     TaskCompletionMetric,
     ToolAccuracyMetric,
+    ToolMisuseMetric,
 )
 from .models import (
     CaseResult,
@@ -49,6 +51,8 @@ __all__ = [
     "LatencyMetric",
     "HallucinationMetric",
     "LLMJudgeMetric",
+    "PromptInjectionMetric",
+    "ToolMisuseMetric",
     "Trace",
     "TraceNode",
     "ToolCall",
