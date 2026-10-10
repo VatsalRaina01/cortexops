@@ -13,13 +13,13 @@ from ..auth import get_current_key_info
 from ..db import get_db
 from ..models.records import CaseResultRecord, EvalDataset, EvalRun, Project, PromptVersion
 from ..models.schemas import (
+    CaseResultResponse,
     DatasetIngestSnapshot,
     EvalDiffResponse,
     EvalRunRequest,
     EvalRunResponse,
     EvalSummaryIngest,
     EvalSummaryResponse,
-    CaseResultResponse,
     PromptIngestSnapshot,
 )
 from ..tiers import TierInfo, require_project_access

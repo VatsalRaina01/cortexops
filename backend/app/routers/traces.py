@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
-
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -12,12 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import get_current_key_info
 from ..db import get_db
-from ..models.records import TraceRecord, Project
+from ..models.records import Project, TraceRecord
 from ..models.schemas import TraceDetailResponse, TraceIngest, TraceResponse
-from ..security import redact_pii, idempotency_store
+from ..security import idempotency_store, redact_pii
 from ..tiers import TierInfo, check_trace_quota, require_project_access, require_scope
 
-import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/traces", tags=["traces"])

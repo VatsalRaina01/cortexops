@@ -102,7 +102,7 @@ async def stripe_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         try:
             event = s.Webhook.construct_event(body, sig, STRIPE_WEBHOOK_SECRET)
         except stripe.error.SignatureVerificationError:
-            raise HTTPException(status_code=400, detail="Invalid webhook signature")
+            raise HTTPException(status_code=400, detail="Invalid webhook signature") from None
     else:
         if get_settings().is_production:
             raise HTTPException(status_code=503, detail="Stripe webhooks not configured.")
@@ -388,7 +388,7 @@ async def paypal_webhook(request: Request, db: AsyncSession = Depends(get_db)):
         import json as _json
         payload = _json.loads(event)
     except Exception:
-        raise HTTPException(status_code=400, detail="Invalid JSON payload.")
+        raise HTTPException(status_code=400, detail="Invalid JSON payload.") from None
 
     event_type   = payload.get("event_type", "")
     resource     = payload.get("resource", {})

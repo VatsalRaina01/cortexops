@@ -10,7 +10,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import record_auth_event
@@ -356,8 +356,8 @@ async def admin_set_scope(
 
     try:
         key.scope = scope
-    except AttributeError:
-        raise HTTPException(500, "scope column not in DB — run migration first")
+    except AttributeError as exc:
+        raise HTTPException(500, "scope column not in DB — run migration first") from exc
 
     await db.commit()
 
