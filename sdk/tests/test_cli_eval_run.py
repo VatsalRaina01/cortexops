@@ -219,7 +219,7 @@ def test_junit_xml_report(workdir):
         "--fail-on", "task_completion < 0.9", "--fail-on", "tool_accuracy < 0.5", "--junit-xml", "junit.xml",
     )
     assert code == 1
-    root = ET.parse(tmp_path / "junit.xml").getroot()
+    root = ET.parse(tmp_path / "junit.xml").getroot()  # nosemgrep: use-defused-xml-parse
     assert (root.tag, root.get("tests"), root.get("failures")) == ("testsuites", "6", "2")
     cases_suite, gate_suite = root.findall("testsuite")
     assert cases_suite.get("name") == "cortexops.payments-agent"
