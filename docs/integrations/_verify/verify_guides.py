@@ -17,6 +17,7 @@ import ast
 import importlib.util
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -98,6 +99,7 @@ assert tracer.last_trace().input == {"question": "Status of REF-9902?"}
 }
 
 FILE_HEADER = re.compile(r"^# ([\w./-]+\.(?:py|yaml))( \(continued\))?$")
+ENV_ASSIGNMENT = re.compile(r"^[A-Z_][A-Z0-9_]*=")
 FENCE = re.compile(r"^```(\w+)\n(.*?)^```", re.MULTILINE | re.DOTALL)
 
 
@@ -121,8 +123,15 @@ def extract(guide: Path) -> tuple[dict[str, str], list[str], list[str]]:
     return files, commands, python_blocks
 
 
-def run(cmd: str, cwd: Path, env: dict[str, str]) -> tuple[bool, str]:
-    proc = subprocess.run(cmd, shell=True, cwd=cwd, env=env, capture_output=True, text=True, timeout=600,
+def run(cmd: str | list[str], cwd: Path, env: dict[str, str]) -> tuple[bool, str]:
+    """Run a guide command such as `PYTHONPATH=. cortexops eval run ...` without a shell."""
+    argv = shlex.split(cmd) if isinstance(cmd, str) else list(cmd)
+    env = dict(env)
+    while argv and ENV_ASSIGNMENT.match(argv[0]):
+        key, _, value = argv.pop(0).partition("=")
+        env[key] = value
+    argv[0] = shutil.which(argv[0], path=env["PATH"]) or argv[0]
+    proc = subprocess.run(argv, cwd=cwd, env=env, capture_output=True, text=True, timeout=600,
                           stdin=subprocess.DEVNULL)
     return proc.returncode == 0, (proc.stdout + proc.stderr)[-3000:]
 
@@ -167,7 +176,7 @@ def verify(name: str) -> list[str]:
         env.pop("CORTEXOPS_API_KEY", None)
         env.pop("PYTHONPATH", None)
 
-        ok, out = run(f"{sys.executable} my_agent.py", work, env)
+        ok, out = run([sys.executable, "my_agent.py"], work, env)
         if not ok or "completed" not in out or "v2" not in out:
             errors.append(f"python my_agent.py failed or missed status/prompt version:\n{out}")
         for cmd in commands:
@@ -175,7 +184,7 @@ def verify(name: str) -> list[str]:
             if not ok:
                 errors.append(f"`{cmd}` failed:\n{out}")
         (work / "_extra_check.py").write_text(EXTRA_CHECKS[name])
-        ok, out = run(f"{sys.executable} _extra_check.py", work, env)
+        ok, out = run([sys.executable, "_extra_check.py"], work, env)
         if not ok:
             errors.append(f"extra check failed:\n{out}")
     return errors
