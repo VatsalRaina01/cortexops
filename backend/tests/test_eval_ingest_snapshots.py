@@ -96,6 +96,24 @@ def test_repeated_ingest_with_same_prompt_is_idempotent(client):
     assert [v["version"] for v in _versions(client, name)] == [2, 1]
 
 
+@pytest.mark.parametrize("changed", [{"model": "gpt-4o-mini"}, {"temperature": 0.1}])
+def test_ingest_commits_new_version_when_settings_changed(client, changed):
+    name = f"settings-{uuid.uuid4().hex[:6]}"
+    _ingest(client, prompt=_snapshot(name, "same", model="gpt-4o", temperature=0.2))
+    _ingest(client, prompt=_snapshot(name, "same", **{"model": "gpt-4o", "temperature": 0.2, **changed}))
+
+    versions = _versions(client, name)
+    assert [v["version"] for v in versions] == [2, 1]
+    assert {k: versions[0][k] for k in changed} == changed
+
+
+def test_ingest_without_settings_reuses_version_with_settings(client):
+    name = f"nosettings-{uuid.uuid4().hex[:6]}"
+    _ingest(client, prompt=_snapshot(name, "same", model="gpt-4o", temperature=0.2))
+    _ingest(client, prompt=_snapshot(name, "same"))
+    assert [v["version"] for v in _versions(client, name)] == [1]
+
+
 def _datasets_named(client, name):
     r = client.get("/v1/eval/datasets")
     assert r.status_code == 200, r.text

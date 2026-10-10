@@ -77,7 +77,14 @@ async def _upsert_prompt(
         .limit(1)
     )
     latest = result.scalar_one_or_none()
-    if latest and latest.content == snapshot.content:
+    # model/temperature only count as a change when the snapshot actually sent them
+    sent = snapshot.model_fields_set
+    if (
+        latest
+        and latest.content == snapshot.content
+        and ("model" not in sent or latest.model == snapshot.model)
+        and ("temperature" not in sent or latest.temperature == snapshot.temperature)
+    ):
         return
     pv = PromptVersion(
         project=project,
