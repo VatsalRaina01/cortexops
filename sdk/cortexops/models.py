@@ -28,6 +28,7 @@ class FailureKind(str, Enum):
     TIMEOUT = "timeout"
     CONTEXT_OVERFLOW = "context_overflow"
     OUTPUT_FORMAT = "output_format"
+    TOOL_ERROR = "tool_error"
     UNKNOWN = "unknown"
 
 

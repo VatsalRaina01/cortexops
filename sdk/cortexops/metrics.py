@@ -81,6 +81,9 @@ class ToolAccuracyMetric(Metric):
             if isinstance(reported, list):
                 actual_calls = set(reported)
 
+        # MCP calls are recorded as "<server>/<tool>"; a bare expected name matches that tool on any server
+        actual_calls |= {name.rsplit("/", 1)[-1] for name in actual_calls if isinstance(name, str) and "/" in name}
+
         expected = set(case.expected_tool_calls)
         missing = expected - actual_calls
 
