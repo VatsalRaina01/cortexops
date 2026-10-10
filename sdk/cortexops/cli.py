@@ -65,6 +65,7 @@ def cmd_eval_run(args: argparse.Namespace) -> int:
         append_step_summary,
         build_report,
         gate_passed,
+        render_junit,
         render_markdown,
     )
 
@@ -118,6 +119,10 @@ def cmd_eval_run(args: argparse.Namespace) -> int:
         report = build_report(summary, thresholds, dataset=args.dataset)
         Path(args.output_json).write_text(json.dumps(report, indent=2))
         print(f"JSON report written to {args.output_json}")
+
+    if args.junit_xml:
+        Path(args.junit_xml).write_text(render_junit(summary, thresholds))
+        print(f"JUnit XML written to {args.junit_xml}")
 
     markdown = render_markdown(summary, thresholds, dataset=args.dataset, title=args.title)
     if args.summary_md:
@@ -395,6 +400,8 @@ def main() -> None:
     run_p.add_argument("--output-json", default=None, metavar="PATH",
                        help="Save a JSON report (summary, threshold results, gate_passed) to file")
     run_p.add_argument("--summary-md", default=None, metavar="PATH", help="Save a markdown summary to file")
+    run_p.add_argument("--junit-xml", default=None, metavar="PATH",
+                       help="Save a JUnit XML report (one testcase per eval case and per fail-on condition)")
     run_p.add_argument("--title", default="CortexOps eval gate", help="Heading for the markdown summary")
     run_p.add_argument("--no-step-summary", action="store_true",
                        help="Do not append the markdown summary to $GITHUB_STEP_SUMMARY")

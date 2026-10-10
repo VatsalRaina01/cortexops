@@ -210,6 +210,35 @@ def test_output_json_report(workdir):
     assert all("trace" not in c for c in report["case_results"])
 
 
+def test_junit_xml_report(workdir):
+    import xml.etree.ElementTree as ET
+
+    tmp_path, module = workdir
+    code = run_cli(
+        "-d", "dataset.yaml", "-a", f"{module}:flaky_agent", "-q",
+        "--fail-on", "task_completion < 0.9", "--fail-on", "tool_accuracy < 0.5", "--junit-xml", "junit.xml",
+    )
+    assert code == 1
+    root = ET.parse(tmp_path / "junit.xml").getroot()
+    assert (root.tag, root.get("tests"), root.get("failures")) == ("testsuites", "6", "2")
+    cases_suite, gate_suite = root.findall("testsuite")
+    assert cases_suite.get("name") == "cortexops.payments-agent"
+    failed = [tc for tc in cases_suite.findall("testcase") if tc.find("failure") is not None]
+    assert [tc.get("name") for tc in failed] == ["refund_04"]
+    assert failed[0].find("failure").get("type") == "unknown"
+    assert failed[0].find("failure").text == "Agent produced no output"
+    gate = {tc.get("name"): tc.find("failure") for tc in gate_suite.findall("testcase")}
+    assert gate["fail_on: task_completion < 0.9"].get("message") == "task_completion=0.750 < 0.9"
+    assert gate["fail_on: tool_accuracy < 0.5"] is None
+
+
+def test_mean_score_in_reports(workdir):
+    tmp_path, module = workdir
+    run_cli("-d", "dataset.yaml", "-a", f"{module}:flaky_agent", "-q", "--output-json", "r.json", "--summary-md", "s.md")
+    assert json.loads((tmp_path / "r.json").read_text())["mean_score"] == pytest.approx((3 * 100 + 75) / 4)
+    assert "| Mean score | 93.8/100 |" in (tmp_path / "s.md").read_text()
+
+
 def test_legacy_output_still_writes_raw_summary(workdir):
     tmp_path, module = workdir
     run_cli("-d", "dataset.yaml", "-a", f"{module}:good_agent", "-q", "-o", "raw.json")
