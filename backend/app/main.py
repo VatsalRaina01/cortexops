@@ -115,9 +115,14 @@ def _collect_secret_issues(env: dict) -> list[str]:
         issues.append("JWT_SECRET not set or uses default")
     if not internal_key or internal_key == "dev_internal_key":
         issues.append("INTERNAL_API_KEY not set or uses default")
-    if not paypal_webhook_id:
-        issues.append("PAYPAL_WEBHOOK_ID not set")
+    if not paypal_webhook_id and _billing_enabled(env):
+        issues.append("PAYPAL_WEBHOOK_ID not set (set BILLING_ENABLED=false to run without billing)")
     return issues
+
+
+def _billing_enabled(env: dict) -> bool:
+    # Billing defaults to on so hosted deployments keep requiring billing secrets.
+    return env.get("BILLING_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
 
 
 # ── Routers ───────────────────────────────────────────────────────────────
