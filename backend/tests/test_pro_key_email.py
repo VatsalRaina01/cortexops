@@ -1,15 +1,43 @@
 """Pro key provisioning sends the key by email automatically (Stripe + PayPal) and can be re-sent by admins."""
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 import re
+import sqlite3
 import uuid
 
 import pytest
+from app.main import app
+from app.routers.admin import ResendKeyEmailRequest, admin_resend_key_email
 from app.services import email as email_service
+from app.services import provisioning
 from conftest import INTERNAL_KEY
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 ADMIN = {"X-Internal-Key": INTERNAL_KEY}
+
+
+def _expire_key(key_id: str) -> None:
+    db_path = os.environ["DATABASE_URL"].split("///", 1)[1]
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("UPDATE api_keys SET expires_at = '2000-01-01 00:00:00.000000' WHERE id = ?", (key_id,))
+
+
+def _run_with_sessions(make_coro):
+    """Run coroutines that need independent DB sessions on a fresh loop and engine."""
+    async def _main():
+        engine = create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
+        try:
+            return await make_coro(async_sessionmaker(engine, expire_on_commit=False))
+        finally:
+            await engine.dispose()
+    return asyncio.run(_main())
 
 
 class Outbox:
@@ -163,7 +191,116 @@ def test_admin_resend_failure_leaves_key_unchanged(client, outbox):
     r = client.post(f"/v1/admin/keys/{old['id']}/resend-email", json={"email": "dev@acme.io"}, headers=ADMIN)
     assert r.status_code == 502
     keys = _keys(client, project)
-    assert [(k["id"], k["is_active"]) for k in keys] == [(old["id"], True)]
+    assert [k["id"] for k in keys if k["is_active"]] == [old["id"]]
+    assert len(outbox.sent) == 1  # only the original provisioning email
+
+    outbox.fail.clear()
+    retry = client.post(f"/v1/admin/keys/{old['id']}/resend-email", json={"email": "dev@acme.io"}, headers=ADMIN)
+    assert retry.status_code == 200, retry.text
+    assert [k["id"] for k in _keys(client, project) if k["is_active"]] == [retry.json()["new_key_id"]]
+
+
+def test_admin_resend_commit_failure_sends_nothing(client, outbox, monkeypatch):
+    project = _project()
+    _stripe_checkout(client, project, metadata_email="dev@acme.io")
+    old = _keys(client, project)[0]
+    sent_before = len(outbox.sent)
+
+    real_commit = AsyncSession.commit
+    armed = {"on": True}
+
+    async def failing_commit(self):
+        if armed["on"]:
+            armed["on"] = False
+            raise OperationalError("COMMIT", {}, Exception("database is down"))
+        return await real_commit(self)
+
+    monkeypatch.setattr(AsyncSession, "commit", failing_commit)
+    with TestClient(app, raise_server_exceptions=False) as c:
+        r = c.post(f"/v1/admin/keys/{old['id']}/resend-email", json={"email": "dev@acme.io"}, headers=ADMIN)
+    assert r.status_code == 500
+    assert len(outbox.sent) == sent_before
+    assert [(k["id"], k["is_active"]) for k in _keys(client, project)] == [(old["id"], True)]
+
+
+def test_admin_resend_rejects_free_tier_key(client, outbox):
+    project = _project()
+    _stripe_checkout(client, project, metadata_email="dev@acme.io")
+    old = _keys(client, project)[0]
+    r = client.post(f"/v1/admin/keys/{old['id']}/upgrade", json={"tier": "free"}, headers=ADMIN)
+    assert r.status_code == 200, r.text
+
+    r = client.post(f"/v1/admin/keys/{old['id']}/resend-email", json={"email": "dev@acme.io"}, headers=ADMIN)
+    assert r.status_code == 400
+    assert "Pro" in r.json()["detail"]
+    assert len(outbox.sent) == 1
+    assert [(k["id"], k["is_active"]) for k in _keys(client, project)] == [(old["id"], True)]
+
+
+def test_admin_resend_rejects_expired_key(client, outbox):
+    project = _project()
+    _stripe_checkout(client, project, metadata_email="dev@acme.io")
+    old = _keys(client, project)[0]
+    _expire_key(old["id"])
+
+    r = client.post(f"/v1/admin/keys/{old['id']}/resend-email", json={"email": "dev@acme.io"}, headers=ADMIN)
+    assert r.status_code == 400
+    assert "expired" in r.json()["detail"]
+    assert len(outbox.sent) == 1
+
+
+def test_expired_pro_key_does_not_block_reprovisioning(client, outbox):
+    project = _project()
+    _stripe_checkout(client, project, metadata_email="dev@acme.io")
+    _expire_key(_keys(client, project)[0]["id"])
+
+    again = _stripe_checkout(client, project, metadata_email="dev@acme.io")
+    assert again["provision"] == "provisioned"
+    assert len(outbox.sent) == 2
+
+
+def test_concurrent_resends_issue_one_key(client, outbox):
+    project = _project()
+    _stripe_checkout(client, project, metadata_email="dev@acme.io")
+    old = _keys(client, project)[0]
+
+    async def _resend(sessions):
+        async with sessions() as db:
+            try:
+                await admin_resend_key_email(old["id"], ResendKeyEmailRequest(email="dev@acme.io"), db, None)
+                return 200
+            except HTTPException as exc:
+                return exc.status_code
+
+    statuses = _run_with_sessions(lambda sessions: asyncio.gather(_resend(sessions), _resend(sessions)))
+    assert sorted(statuses) == [200, 409]
+    assert len(outbox.sent) == 2  # provisioning + exactly one resend
+    assert len([k for k in _keys(client, project) if k["is_active"]]) == 1
+
+
+def test_concurrent_webhooks_provision_one_key(client, outbox, monkeypatch):
+    project = _project()
+    real_audit = provisioning.record_auth_event
+
+    async def slow_audit(*args, **kwargs):
+        await asyncio.sleep(0.05)  # widen the gap between the active-key lookup and the commit
+        await real_audit(*args, **kwargs)
+
+    monkeypatch.setattr(provisioning, "record_auth_event", slow_audit)
+
+    async def _provision(sessions, ref):
+        async with sessions() as db:
+            result = await provisioning.provision_pro_key(
+                db, project=project, email="dev@acme.io", source="stripe", ref=ref,
+            )
+            return result.status
+
+    statuses = _run_with_sessions(
+        lambda sessions: asyncio.gather(_provision(sessions, "cs_a"), _provision(sessions, "cs_b")),
+    )
+    assert sorted(statuses) == ["already_provisioned", "provisioned"]
+    assert len(_keys(client, project)) == 1
+    assert len(outbox.sent) == 1
 
 
 def test_admin_resend_requires_internal_key(client):
