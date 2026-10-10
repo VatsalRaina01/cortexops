@@ -14,6 +14,7 @@ from .models import (
     EvalSummary,
     FailureKind,
     RunStatus,
+    ThresholdResult,
     Trace,
     TraceNode,
 )
@@ -193,8 +194,12 @@ class EvalSuite:
         return metric, op, float(threshold_str)
 
     @classmethod
-    def _check_threshold(cls, summary: EvalSummary, fail_on: str) -> None:
-        """Parse and evaluate a threshold expression like 'task_completion < 0.90'."""
+    def evaluate_threshold(cls, summary: EvalSummary, fail_on: str) -> ThresholdResult:
+        """Evaluate a threshold expression like 'task_completion < 0.90' without raising.
+
+        Metrics are on a 0-1 scale: task_completion, tool_accuracy, pass_rate.
+        Raises ValueError if the expression is invalid.
+        """
         metric, op, threshold = cls._parse_threshold(fail_on)
 
         actual = {
@@ -210,9 +215,22 @@ class EvalSuite:
             ">=": actual >= threshold,
         }.get(op, False)
 
-        if failed:
+        return ThresholdResult(
+            expression=fail_on.strip(),
+            metric=metric,
+            op=op,
+            threshold=threshold,
+            actual=actual,
+            failed=failed,
+        )
+
+    @classmethod
+    def _check_threshold(cls, summary: EvalSummary, fail_on: str) -> None:
+        """Parse and evaluate a threshold expression like 'task_completion < 0.90'."""
+        result = cls.evaluate_threshold(summary, fail_on)
+        if result.failed:
             raise EvalThresholdError(
-                f"Eval gate failed: {metric}={actual:.3f} {op} {threshold} "
+                f"Eval gate failed: {result.metric}={result.actual:.3f} {result.op} {result.threshold} "
                 f"(project={summary.project})"
             )
 

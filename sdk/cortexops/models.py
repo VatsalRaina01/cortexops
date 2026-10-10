@@ -109,6 +109,17 @@ class CaseResult(BaseModel):
     trace: Trace | None = None
 
 
+class ThresholdResult(BaseModel):
+    """Outcome of one fail_on expression; `failed` is True when the condition is met."""
+
+    expression: str
+    metric: str
+    op: str
+    threshold: float
+    actual: float
+    failed: bool
+
+
 class EvalSummary(BaseModel):
     run_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     project: str
