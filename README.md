@@ -135,17 +135,34 @@ cases:
 
 ## CI eval gate
 
-Add to `.github/workflows/eval.yml`:
+Add the [eval-gate GitHub Action](actions/eval-gate) to a workflow:
 
 ```yaml
-- name: CortexOps eval gate
-  run: |
-    python examples/langgraph_payments/run_eval.py \
-      --dataset golden_v1.yaml \
-      --fail-on "task_completion < 0.90"
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write   # for the sticky PR comment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ashishodu2023/cortexops/actions/eval-gate@main   # pin to a tag or SHA
+        with:
+          dataset: golden_v1.yaml
+          agent: agent:build_agent()
+          fail-on: |
+            task_completion < 0.90
+            tool_accuracy < 0.95
 ```
 
-If the eval drops below threshold, the job exits non-zero and the PR is blocked.
+It writes a report (metrics, thresholds, failed cases) to the job summary, keeps one comment on the PR up to date, and fails the job if any condition is true. Without the action, the same gate is one CLI call:
+
+```bash
+cortexops eval run --dataset golden_v1.yaml --agent "agent:build_agent()" \
+  --fail-on "task_completion < 0.90" --output-json report.json --summary-md summary.md
+```
+
+GitLab users can include [`ci-templates/gitlab/cortexops-eval.gitlab-ci.yml`](ci-templates/gitlab/cortexops-eval.gitlab-ci.yml); a `cortexops-eval` [pre-commit](.pre-commit-hooks.yaml) hook is also available.
 
 Or gate from pytest (`pip install "cortexops[pytest]"`):
 
