@@ -48,6 +48,12 @@ jobs:
       - name: Run SDK tests
         run: cd sdk && pytest tests/ -v --tb=short
 
+      - name: Install backend deps
+        run: pip install -r backend/requirements.txt pytest
+
+      - name: Run backend tests
+        run: cd backend && pytest tests/ -v --tb=short
+
   # ════════════════════════════════════════════════════════════
   # JOB 3: PYTHON SAST — Bandit
   # Finds: hardcoded secrets, insecure random, subprocess injection,

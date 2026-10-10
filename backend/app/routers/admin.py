@@ -14,10 +14,12 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..audit import record_auth_event
+from ..auth import generate_api_key
 from ..config import get_settings
 from ..db import get_db
 from ..models.records import ApiKey, AuthAuditLog, Project
 from ..security import client_ip
+from ..services.provisioning import deliver_pro_key, is_deliverable_email
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 settings = get_settings()
@@ -216,6 +218,80 @@ async def admin_upgrade_key(
         "old_tier": old_tier,
         "new_tier": body.tier,
         "scope": body.scope,
+    }
+
+
+class ResendKeyEmailRequest(BaseModel):
+    email: str
+
+
+@router.post("/keys/{key_id}/resend-email", status_code=200, responses={
+    400: {"description": "Key revoked or invalid email"},
+    401: {"description": "Missing or invalid X-Internal-Key header"},
+    403: {"description": "Forbidden"},
+    502: {"description": "Email delivery failed — key left unchanged"},
+    500: {"description": "Internal server error"},
+})
+async def admin_resend_key_email(
+    key_id: str,
+    body: ResendKeyEmailRequest,
+    db: AsyncSession = Depends(get_db),
+    _: None = Depends(require_admin),
+):
+    """
+    Rotate a key and email the replacement to the customer.
+
+    Raw keys are stored hashed, so a lost key email cannot be re-sent as-is.
+    This issues a new key with the same project/tier/scope, emails it, and
+    revokes the old one. If delivery fails, nothing is changed.
+    The new key is never returned in the response.
+
+    Admin only — requires X-Internal-Key header.
+    """
+    if not is_deliverable_email(body.email):
+        raise HTTPException(400, "A valid email address is required")
+
+    old_key = await db.scalar(select(ApiKey).where(ApiKey.id == key_id))
+    if not old_key:
+        raise HTTPException(403, "Forbidden")
+    if not old_key.is_active:
+        raise HTTPException(400, "Key is revoked — provision a new key instead")
+
+    project = old_key.project
+    raw_key, hashed = generate_api_key()
+    new_key = ApiKey(
+        project=project,
+        name=old_key.name,
+        tier=old_key.tier,
+        scope=getattr(old_key, "scope", "read_write") or "read_write",
+        key_hash=hashed,
+        expires_at=old_key.expires_at,
+    )
+    db.add(new_key)
+    await db.flush()
+
+    status, provider = await deliver_pro_key(
+        db, email=body.email, project=project, key_id=new_key.id, raw_key=raw_key,
+        event="pro_key_email_resend",
+    )
+    if status != "sent":
+        await db.rollback()
+        await record_auth_event(
+            db, event="pro_key_email_resend", outcome="failure", project=project, key_id=key_id,
+            detail=f"status={status}",
+        )
+        await db.commit()
+        raise HTTPException(502, f"Email delivery failed ({status}) — key {key_id} left unchanged")
+
+    old_key.is_active = False
+    new_key_id = new_key.id
+    await db.commit()
+    return {
+        "resent": True,
+        "project": project,
+        "old_key_id": key_id,
+        "new_key_id": new_key_id,
+        "provider": provider,
     }
 
 
