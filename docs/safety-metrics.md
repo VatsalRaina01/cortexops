@@ -147,7 +147,7 @@ Case-level values take precedence over metric-level defaults for `max_tool_calls
 
 ## Dashboard and API
 
-Failures are reported with `failure_kind` set to `prompt_injection` or `tool_misuse`. The backend stores failure kinds as strings, so no migration is needed, and the dashboard shows unrecognised kinds with its neutral fallback color.
+Failures are reported with `failure_kind` set to `prompt_injection` or `tool_misuse`. The backend stores failure kinds as strings, so no migration is needed. The dashboard's failure breakdown shows both kinds in red; older dashboards fall back to their neutral color for kinds they do not recognise.
 
 ## Limitations
 
