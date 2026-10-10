@@ -21,8 +21,8 @@ inputs:
   command:
     description: >-
       Custom command to run instead of 'cortexops eval run'. Its exit code decides the gate. To get
-      outputs and a PR comment, write the JSON report to $CORTEXOPS_REPORT_JSON and the markdown
-      summary to $CORTEXOPS_SUMMARY_MD.
+      outputs and a PR comment, write the JSON report to $CORTEXOPS_REPORT_JSON, the markdown
+      summary to $CORTEXOPS_SUMMARY_MD and, optionally, JUnit XML to $CORTEXOPS_JUNIT_XML.
     required: false
     default: ""
   fail-on:
@@ -107,12 +107,21 @@ outputs:
   tool-accuracy:
     description: Tool accuracy (0-1).
     value: ${{ steps.run.outputs.tool-accuracy }}
+  mean-score:
+    description: Mean case score (0-100).
+    value: ${{ steps.run.outputs.mean-score }}
+  failed:
+    description: Number of failed cases.
+    value: ${{ steps.run.outputs.failed }}
   summary-path:
     description: Path to the markdown summary.
     value: ${{ steps.run.outputs.summary-path }}
   report-path:
     description: Path to the JSON report (summary, thresholds, case results).
     value: ${{ steps.run.outputs.report-path }}
+  junit-path:
+    description: Path to the JUnit XML report (one testcase per eval case and per fail-on condition).
+    value: ${{ steps.run.outputs.junit-path }}
   comment-url:
     description: URL of the sticky PR comment, if one was written.
     value: ${{ steps.comment.outputs.comment-url }}
@@ -154,10 +163,10 @@ runs:
           (cd "$WORKDIR" && "$PY" -m pip install --disable-pip-version-check -q $EXTRA_INSTALL)
           set +f
         fi
-        if ! "$PY" -m cortexops.cli eval run --help | grep -q -- '--output-json'; then
+        if ! "$PY" -m cortexops.cli eval run --help | grep -q -- '--junit-xml'; then
           installed="$("$PY" -m pip show cortexops 2>/dev/null | sed -n 's/^Version: //p')"
           echo "::error title=CortexOps eval gate::cortexops ${installed:-(not installed)} is too old for this action;" \
-               "it needs 'eval run --output-json'. Use cortexops-version: bundled or a newer release."
+               "it needs 'eval run --junit-xml'. Use cortexops-version: bundled or a newer release."
           exit 2
         fi
         "$PY" -m cortexops.cli version
@@ -183,6 +192,7 @@ runs:
         out_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/cortexops-eval-XXXXXX")"
         export CORTEXOPS_REPORT_JSON="$out_dir/report.json"
         export CORTEXOPS_SUMMARY_MD="$out_dir/summary.md"
+        export CORTEXOPS_JUNIT_XML="$out_dir/junit.xml"
         [ -n "$OPENAI_API_KEY" ] || unset OPENAI_API_KEY
         [ -n "$CORTEXOPS_API_KEY" ] || unset CORTEXOPS_API_KEY
 
@@ -196,7 +206,7 @@ runs:
         else
           args=(eval run --dataset "$INPUT_DATASET" --quiet
                 --output-json "$CORTEXOPS_REPORT_JSON" --summary-md "$CORTEXOPS_SUMMARY_MD"
-                --title "$INPUT_TITLE")
+                --junit-xml "$CORTEXOPS_JUNIT_XML" --title "$INPUT_TITLE")
           [ -n "$INPUT_AGENT" ] && args+=(--agent "$INPUT_AGENT")
           [ -n "$INPUT_FAIL_ON" ] && args+=(--fail-on "$INPUT_FAIL_ON")
           [ "$INPUT_JUDGE" = "true" ] && args+=(--judge)
@@ -216,6 +226,7 @@ runs:
           echo "exit-code=$code"
           if [ "$code" -eq 0 ]; then echo "passed=true"; else echo "passed=false"; fi
           [ -f "$CORTEXOPS_SUMMARY_MD" ] && echo "summary-path=$CORTEXOPS_SUMMARY_MD"
+          [ -f "$CORTEXOPS_JUNIT_XML" ] && echo "junit-path=$CORTEXOPS_JUNIT_XML"
           if [ -f "$CORTEXOPS_REPORT_JSON" ]; then
             echo "report-path=$CORTEXOPS_REPORT_JSON"
             "$PY" - "$CORTEXOPS_REPORT_JSON" <<'PY'
@@ -226,6 +237,8 @@ runs:
         print(f"task-completion={r['task_completion_rate']:.4f}")
         print(f"pass-rate={r['pass_rate']:.4f}")
         print(f"tool-accuracy={r['tool_accuracy'] / 100:.4f}")
+        print(f"mean-score={r['mean_score']:.1f}")
+        print(f"failed={r['failed']}")
         PY
           fi
         } >> "$GITHUB_OUTPUT"

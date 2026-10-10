@@ -69,7 +69,7 @@ the job summary, outputs, and PR comment, have it write the reports to the paths
 |---|---|---|
 | `dataset` | | Golden dataset YAML, relative to `working-directory`. Required unless `command` is set. |
 | `agent` | | `module:attr` or `file.py:attr`; trailing `()` calls a factory. Without it a placeholder agent runs. |
-| `command` | | Custom command instead of `cortexops eval run`. Gets `CORTEXOPS_REPORT_JSON` and `CORTEXOPS_SUMMARY_MD` env vars. |
+| `command` | | Custom command instead of `cortexops eval run`. Gets `CORTEXOPS_REPORT_JSON`, `CORTEXOPS_SUMMARY_MD` and `CORTEXOPS_JUNIT_XML` env vars. |
 | `fail-on` | `pass_rate < 1.0` | Gate conditions, one per line; the gate fails if any is true. Metrics (0-1): `task_completion`, `tool_accuracy`, `pass_rate`. Operators: `<`, `<=`, `>`, `>=`. |
 | `working-directory` | `.` | Directory the eval runs in. |
 | `python-version` | `3.11` | Passed to `actions/setup-python`. Empty string uses the Python already on `PATH`. |
@@ -95,8 +95,11 @@ the job summary, outputs, and PR comment, have it write the reports to the paths
 | `task-completion` | Task completion rate, 0-1. |
 | `pass-rate` | Fraction of passing cases, 0-1. |
 | `tool-accuracy` | Tool accuracy, 0-1. |
+| `mean-score` | Mean case score, 0-100. |
+| `failed` | Number of failed cases. |
 | `summary-path` | Markdown report path. |
 | `report-path` | JSON report path (summary, threshold results, case results without traces). |
+| `junit-path` | JUnit XML path, for test-report actions. |
 | `comment-url` | URL of the sticky PR comment, when one was written. |
 
 Upload the reports as an artifact:
