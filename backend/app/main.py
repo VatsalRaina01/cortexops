@@ -11,7 +11,7 @@ from .config import get_settings
 from .db import get_db, init_db
 from .observability import configure_logging, health_aggregator
 from .resilience import openai_circuit, slack_circuit, stripe_circuit
-from .routers import admin, billing, eval_api, evals, jwt_auth, keys, prompts, traces
+from .routers import admin, billing, eval_api, evals, jwt_auth, keys, otlp, prompts, traces
 from .security import RateLimitMiddleware, RequestIDMiddleware
 
 settings = get_settings()
@@ -132,6 +132,7 @@ app.include_router(billing.router)
 app.include_router(evals.router)
 app.include_router(eval_api.router)
 app.include_router(traces.router)
+app.include_router(otlp.router)
 app.include_router(prompts.router)
 app.include_router(keys.router)
 
