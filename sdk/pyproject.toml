@@ -60,6 +60,7 @@ Changelog     = "https://github.com/ashishodu2023/cortexops/releases"
 
 [project.scripts]
 cortexops = "cortexops.cli:main"
+cortexops-mcp = "cortexops.mcp_server:main"
 
 [project.entry-points.pytest11]
 cortexops = "cortexops.pytest_plugin"
