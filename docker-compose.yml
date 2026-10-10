@@ -191,7 +191,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp
-      - /etc/nginx/conf.d
+      # nginx-unprivileged (UID 101) renders its config from templates here at startup.
+      - /etc/nginx/conf.d:uid=101,gid=101
     depends_on:
       api:
         condition: service_healthy
