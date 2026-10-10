@@ -32,6 +32,7 @@ from .models import (
     Trace,
     TraceNode,
 )
+from .pytest_plugin import eval_gate
 from .tracer import CortexTracer
 
 __version__ = "0.5.0"
@@ -40,6 +41,7 @@ __all__ = [
     "CortexTracer",
     "EvalSuite",
     "EvalThresholdError",
+    "eval_gate",
     "CortexClient",
     "Metric",
     "TaskCompletionMetric",
