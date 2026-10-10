@@ -46,10 +46,9 @@ async def _upsert_dataset(
     if not snapshot or not snapshot.name or not snapshot.cases:
         return
     existing = await db.execute(
-        select(EvalDataset).where(
-            EvalDataset.project == project,
-            EvalDataset.name == snapshot.name,
-        )
+        select(EvalDataset.id)
+        .where(EvalDataset.project == project, EvalDataset.name == snapshot.name)
+        .limit(1)
     )
     if existing.scalar_one_or_none():
         return
@@ -71,21 +70,23 @@ async def _upsert_prompt(
 ) -> None:
     if not snapshot or not snapshot.prompt_name or not snapshot.content:
         return
-    existing = await db.execute(
-        select(PromptVersion).where(
-            PromptVersion.project == project,
-            PromptVersion.prompt_name == snapshot.prompt_name,
-        )
+    result = await db.execute(
+        select(PromptVersion)
+        .where(PromptVersion.project == project, PromptVersion.prompt_name == snapshot.prompt_name)
+        .order_by(PromptVersion.version.desc())
+        .limit(1)
     )
-    if existing.scalar_one_or_none():
+    latest = result.scalar_one_or_none()
+    if latest and latest.content == snapshot.content:
         return
     pv = PromptVersion(
         project=project,
         prompt_name=snapshot.prompt_name,
-        version=1,
+        version=(latest.version + 1) if latest else 1,
         content=snapshot.content,
         model=snapshot.model,
         temperature=snapshot.temperature,
+        parent_version_id=latest.id if latest else None,
         commit_message=snapshot.commit_message,
         author=snapshot.author,
     )
