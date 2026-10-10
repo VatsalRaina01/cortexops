@@ -260,11 +260,13 @@ runs:
           const marker = `<!-- cortexops-eval-gate: ${process.env.COMMENT_TAG} -->`;
           let body = fs.readFileSync(process.env.SUMMARY_PATH, 'utf8');
           const run = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-          body = `${marker}\n${body}\n<sub>[Workflow run](${run}) for ${context.sha.slice(0, 7)}</sub>\n`;
+          const pr = context.payload.pull_request;
+          const sha = (pr ? pr.head.sha : context.sha).slice(0, 7);
+          body = `${marker}\n${body}\n<sub>[Workflow run](${run}) for ${sha}</sub>\n`;
           if (body.length > 65000) {
             body = body.slice(0, 64000) + `\n\n_Summary truncated; see the [workflow run](${run})._\n`;
           }
-          const issue_number = context.payload.pull_request ? context.payload.pull_request.number : context.issue.number;
+          const issue_number = pr ? pr.number : context.issue.number;
           const { owner, repo } = context.repo;
           try {
             const comments = await github.paginate(github.rest.issues.listComments, {
