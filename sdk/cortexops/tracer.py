@@ -24,6 +24,9 @@ _ENV_URL           = "CORTEXOPS_API_URL"
 _ENV_PROJECT       = "CORTEXOPS_PROJECT"
 _ENV_ENV           = "CORTEXOPS_ENVIRONMENT"
 _ENV_SAMPLE_RATE   = "CORTEXOPS_SAMPLE_RATE"
+# Hosted API limits on TraceIngest.prompt_name / prompt_version; longer labels get the trace rejected
+_MAX_PROMPT_NAME    = 255
+_MAX_PROMPT_VERSION = 64
 
 
 def _resolve_sample_rate(explicit: float | None) -> float:
@@ -155,6 +158,10 @@ class CortexTracer:
             raise ValueError("prompt name must be a non-empty string")
         if not version:
             raise ValueError("prompt version must be non-empty")
+        if len(name) > _MAX_PROMPT_NAME:
+            raise ValueError(f"prompt name must be at most {_MAX_PROMPT_NAME} characters")
+        if len(version) > _MAX_PROMPT_VERSION:
+            raise ValueError(f"prompt version must be at most {_MAX_PROMPT_VERSION} characters")
         self._prompt = (name, version)
 
     def clear_prompt(self) -> None:
@@ -380,7 +387,11 @@ class CortexTracer:
                     raise ImportError("pip install openai-agents") from e
                 import asyncio
                 return await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: Runner.run_sync(agent, prompt, **kwargs)
+                    None, lambda: tracer._run_traced(
+                        fn=lambda: Runner.run_sync(agent, prompt, **kwargs),
+                        input={"prompt": prompt},
+                        framework="openai_agents",
+                    )
                 )
 
             def __getattr__(self_, name: str) -> Any:
@@ -458,7 +469,11 @@ class CortexTracer:
             async def arun(self_, message: str, **kwargs) -> Any:
                 import asyncio
                 return await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: agent.run(message, **kwargs)
+                    None, lambda: tracer._run_traced(
+                        fn=lambda: agent.run(message, **kwargs),
+                        input={"message": message},
+                        framework="agno",
+                    )
                 )
 
             def __getattr__(self_, name: str) -> Any:

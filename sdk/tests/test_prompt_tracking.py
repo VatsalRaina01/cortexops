@@ -58,6 +58,41 @@ def test_set_prompt_rejects_blank(tracer, name, version):
         tracer.set_prompt(name, version)
 
 
+@pytest.mark.parametrize("name,version", [("p" * 256, "v1"), ("p", "v" * 65)])
+def test_set_prompt_rejects_labels_over_api_limits(tracer, name, version):
+    with pytest.raises(ValueError, match="at most"):
+        tracer.set_prompt(name, version)
+    assert tracer.prompt is None
+
+
+def test_set_prompt_accepts_labels_at_api_limits(tracer):
+    tracer.set_prompt("p" * 255, "v" * 64)
+    assert tracer.prompt == ("p" * 255, "v" * 64)
+
+
+def test_async_agno_and_openai_wrappers_are_traced(tracer, monkeypatch):
+    import asyncio
+    import sys
+    import types
+
+    tracer.set_prompt("refund-system", "v3")
+
+    class _Agent:
+        def run(self, message, **kwargs):
+            return {"output": message}
+
+    fake_agents = types.ModuleType("agents")
+    fake_agents.Runner = types.SimpleNamespace(run_sync=lambda agent, prompt, **kw: {"output": prompt})
+    monkeypatch.setitem(sys.modules, "agents", fake_agents)
+
+    asyncio.run(tracer._wrap_agno(_Agent()).arun("hi"))
+    asyncio.run(tracer._wrap_openai_agents(_Agent()).run("refund #1"))
+
+    traces = tracer.traces()
+    assert [t.input for t in traces] == [{"message": "hi"}, {"prompt": "refund #1"}]
+    assert {(t.prompt_name, t.prompt_version) for t in traces} == {("refund-system", "v3")}
+
+
 def test_prompt_and_environment_in_flushed_payload(monkeypatch):
     sent: list[dict] = []
     tracer = CortexTracer(project="p", api_key="cxo-test", environment="production", sample_rate=1.0)
