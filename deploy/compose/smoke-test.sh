@@ -52,9 +52,17 @@ wait_for bootstrap "exited 0"
 curl -fsS "$API/health" | grep -q '"environment":"production"' || fail "API is not running in production mode"
 echo "ok: API healthy in production mode"
 
-KEY="$(docker compose logs --no-log-prefix bootstrap | sed -n 's/.*CORTEXOPS_API_KEY=\(cxo-[0-9a-f]*\).*/\1/p' | tail -n 1)"
-[ -n "$KEY" ] || fail "bootstrap did not print an API key"
-echo "ok: bootstrap issued the first API key for '$PROJECT'"
+bootstrap_logs="$(docker compose logs --no-log-prefix bootstrap)"
+KEY="$(sed -n 's/.*CORTEXOPS_API_KEY=\(cxo-[0-9a-f]*\).*/\1/p' <<<"$bootstrap_logs" | tail -n 1)"
+if [ -n "$KEY" ]; then
+    echo "ok: bootstrap issued the first API key for '$PROJECT'"
+elif [ -n "${SMOKE_API_KEY:-}" ] && grep -q "already has an active API key" <<<"$bootstrap_logs"; then
+    # Re-run against an existing install: bootstrap must be a no-op and the earlier key must still work.
+    KEY="$SMOKE_API_KEY"
+    echo "ok: bootstrap left the existing key for '$PROJECT' in place"
+else
+    fail "bootstrap did not print an API key (set SMOKE_API_KEY to re-test an existing install)"
+fi
 
 curl -fsS "$API/v1/admin/keys?project=$PROJECT" -H "X-Internal-Key: ${INTERNAL_API_KEY:?}" \
     | grep -q "\"tier\":\"${BOOTSTRAP_TIER:-pro}\"" || fail "bootstrapped key is not on the '${BOOTSTRAP_TIER:-pro}' tier"

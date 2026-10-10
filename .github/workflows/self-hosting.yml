@@ -95,12 +95,15 @@ jobs:
         run: docker compose up -d --build
 
       - name: Smoke test
-        run: ./deploy/compose/smoke-test.sh
-
-      - name: Restart keeps data and the bootstrap stays idempotent
         run: |
-          docker compose restart api worker
-          docker compose up -d
+          ./deploy/compose/smoke-test.sh
+          key="$(docker compose logs --no-log-prefix bootstrap | sed -n 's/.*CORTEXOPS_API_KEY=\(cxo-[0-9a-f]*\).*/\1/p' | tail -n 1)"
+          echo "::add-mask::$key"
+          echo "SMOKE_API_KEY=$key" >> "$GITHUB_ENV"
+
+      - name: Recreated containers keep data and the bootstrap stays idempotent
+        run: |
+          docker compose up -d --force-recreate
           ./deploy/compose/smoke-test.sh
 
       - name: Logs
