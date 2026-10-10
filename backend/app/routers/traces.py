@@ -21,18 +21,25 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/traces", tags=["traces"])
 
+_PROMPT_FILTER_BATCH = 100
+
 
 def _json_field_token(key: str, value: str) -> str:
     # raw_trace is written with json.dumps defaults, so a top-level field serializes as `"key": "value"`
     return f"{json.dumps(key)}: {json.dumps(value)}"
 
 
+def _load_raw(t: TraceRecord) -> dict:
+    try:
+        raw = json.loads(t.raw_trace) if t.raw_trace else {}
+    except ValueError:
+        return {}
+    return raw if isinstance(raw, dict) else {}
+
+
 def _to_response(t: TraceRecord, raw: dict | None = None) -> TraceResponse:
     if raw is None:
-        try:
-            raw = json.loads(t.raw_trace) if t.raw_trace else {}
-        except ValueError:
-            raw = {}
+        raw = _load_raw(t)
     meta = raw.get("metadata") or {}
     sampled = meta.get("sampled") if isinstance(meta, dict) else None
     return TraceResponse(
@@ -107,6 +114,9 @@ async def ingest_trace(
     safe_payload["nodes"]  = redact_pii(safe_payload.get("nodes", []))
     if safe_payload.get("failure_detail"):
         safe_payload["failure_detail"] = redact_pii(safe_payload["failure_detail"])
+    safe_payload["metadata"] = redact_pii(safe_payload.get("metadata", {}))
+    safe_payload["prompt_name"] = redact_pii(safe_payload.get("prompt_name"))
+    safe_payload["prompt_version"] = redact_pii(safe_payload.get("prompt_version"))
 
     trace = TraceRecord(
         id=str(uuid.uuid4()),
@@ -185,16 +195,36 @@ async def list_traces(
         q = q.where(TraceRecord.status == status)
     if environment:
         q = q.where(TraceRecord.environment == environment)
-    if prompt_name:
-        q = q.where(TraceRecord.raw_trace.contains(_json_field_token("prompt_name", prompt_name), autoescape=True))
-    if prompt_version:
-        q = q.where(
-            TraceRecord.raw_trace.contains(_json_field_token("prompt_version", prompt_version), autoescape=True)
-        )
-    q = q.order_by(TraceRecord.created_at.desc()).limit(limit)
+    prompt_filters = {
+        key: value
+        for key, value in (("prompt_name", prompt_name), ("prompt_version", prompt_version))
+        if value
+    }
+    # The substring match is only a prefilter: the same token can appear inside nested
+    # input/output/metadata, so rows are re-checked against the parsed top-level fields.
+    for key, value in prompt_filters.items():
+        q = q.where(TraceRecord.raw_trace.contains(_json_field_token(key, value), autoescape=True))
+    q = q.order_by(TraceRecord.created_at.desc(), TraceRecord.id.desc())
 
-    result = await db.execute(q)
-    return [_to_response(t) for t in result.scalars().all()]
+    if not prompt_filters:
+        result = await db.execute(q.limit(limit))
+        return [_to_response(t) for t in result.scalars().all()]
+
+    matches: list[TraceResponse] = []
+    batch_size = max(limit, _PROMPT_FILTER_BATCH)
+    offset = 0
+    while len(matches) < limit:
+        rows = (await db.execute(q.offset(offset).limit(batch_size))).scalars().all()
+        for t in rows:
+            raw = _load_raw(t)
+            if all(raw.get(key) == value for key, value in prompt_filters.items()):
+                matches.append(_to_response(t, raw))
+                if len(matches) == limit:
+                    break
+        if len(rows) < batch_size:
+            break
+        offset += batch_size
+    return matches
 
 
 @router.get("/quota", tags=["traces"], responses={
