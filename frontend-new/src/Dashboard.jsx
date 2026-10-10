@@ -334,9 +334,15 @@ function TraceRow({trace,onClick,showCase=true}){
       {showCase&&<span style={{flex:1,fontSize:13,color:M.gray900,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{trace.case_id||"live trace"}</span>}
       <Badge color={trace.status==="failed"?M.red:M.green} bg={trace.status==="failed"?M.redLight:M.greenLight}>{trace.status==="failed"?"Failed":"OK"}</Badge>
       <LatencyChip ms={trace.total_latency_ms||0}/>
+      {trace.prompt_name&&<span title={promptLabel(trace)}><Badge color={M.purple} bg={M.purpleLight}>{promptLabel(trace).slice(0,24)}</Badge></span>}
       {trace.failure_kind&&<Badge color={M.red} bg={M.redLight}>{trace.failure_kind.replace("FailureKind.","").slice(0,12)}</Badge>}
     </div>
   );
+}
+
+function promptLabel(trace){
+  if(!trace?.prompt_name)return"";
+  return trace.prompt_version?`${trace.prompt_name}@${trace.prompt_version}`:trace.prompt_name;
 }
 
 function LatencyChip({ms}){
@@ -461,7 +467,9 @@ function WaterfallPanel({trace,onClose,loading,datasets,token,onPromoted}){
           {[["Latency",`${Math.round(trace.total_latency_ms||0)}ms`,M.amber,M.amberLight],
             ["Environment",trace.environment||"development",M.cyan,M.cyanLight],
             ["Case",trace.case_id||"live trace",M.gray700,M.gray100],
-            ["Failure",trace.failure_kind?.replace("FailureKind.","")||"none",trace.failure_kind?M.red:M.gray600,trace.failure_kind?M.redLight:M.gray100]
+            ["Failure",trace.failure_kind?.replace("FailureKind.","")||"none",trace.failure_kind?M.red:M.gray600,trace.failure_kind?M.redLight:M.gray100],
+            ["Prompt",promptLabel({prompt_name:trace.prompt_name??raw.prompt_name,prompt_version:trace.prompt_version??raw.prompt_version})||"untracked",M.purple,M.purpleLight],
+            ["Sampling",raw.metadata?.sample_rate!=null?`${Math.round(raw.metadata.sample_rate*100)}%${raw.metadata.sampled===false?" · error capture":""}`:"100%",M.gray700,M.gray100]
           ].map(([l,v,c,bg])=>(
             <div key={l} style={{background:bg,borderRadius:8,padding:"10px 12px",border:`1px solid ${M.gray200}`}}>
               <div style={{fontSize:10,color:M.gray600,textTransform:"uppercase",letterSpacing:".06em",marginBottom:3,fontWeight:600}}>{l}</div>
@@ -1524,7 +1532,7 @@ export default function App(){
     if(tab==="traces"&&filter!=="all"&&t.status!==filter)return false;
     if(traceSearch.trim()){
       const q=traceSearch.toLowerCase();
-      const match=(t.trace_id||"").toLowerCase().includes(q)||(t.case_id||"").toLowerCase().includes(q)||(t.failure_kind||"").toLowerCase().includes(q);
+      const match=(t.trace_id||"").toLowerCase().includes(q)||(t.case_id||"").toLowerCase().includes(q)||(t.failure_kind||"").toLowerCase().includes(q)||promptLabel(t).toLowerCase().includes(q);
       if(!match)return false;
     }
     return true;
@@ -1814,7 +1822,7 @@ export default function App(){
                   title="Trace explorer"
                   subtitle={`${filteredTraces.length} shown · ${traces.length} loaded${traceDateActive?` · ${traceDateLabel(traceDatePreset,traceDateFrom,traceDateTo)}`:""}${filter!=="all"?` · ${filter} only`:""}`}
                   action={
-                    <input value={traceSearch} onChange={e=>setTraceSearch(e.target.value)} placeholder="Search ID, case, failure…"
+                    <input value={traceSearch} onChange={e=>setTraceSearch(e.target.value)} placeholder="Search ID, case, failure, prompt…"
                       style={{background:M.gray50,border:`1px solid ${M.gray200}`,borderRadius:6,padding:"6px 10px",fontSize:12,color:M.gray900,minWidth:200}}/>
                   } noPad>
                   <div style={{padding:"10px 18px",borderBottom:`1px solid ${M.gray200}`,display:"grid",gap:10}}>

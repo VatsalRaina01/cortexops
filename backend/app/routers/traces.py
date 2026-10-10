@@ -23,6 +23,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/traces", tags=["traces"])
 
 
+def _json_field_token(key: str, value: str) -> str:
+    # raw_trace is written with json.dumps defaults, so a top-level field serializes as `"key": "value"`
+    return f"{json.dumps(key)}: {json.dumps(value)}"
+
+
+def _to_response(t: TraceRecord, raw: dict | None = None) -> TraceResponse:
+    if raw is None:
+        try:
+            raw = json.loads(t.raw_trace) if t.raw_trace else {}
+        except ValueError:
+            raw = {}
+    meta = raw.get("metadata") or {}
+    sampled = meta.get("sampled") if isinstance(meta, dict) else None
+    return TraceResponse(
+        trace_id=t.id,
+        project=t.project,
+        case_id=t.case_id,
+        status=t.status,
+        total_latency_ms=t.total_latency_ms,
+        failure_kind=t.failure_kind,
+        failure_detail=t.failure_detail,
+        environment=t.environment,
+        prompt_name=raw.get("prompt_name"),
+        prompt_version=raw.get("prompt_version"),
+        sampled=sampled if isinstance(sampled, bool) else None,
+        created_at=t.created_at,
+    )
+
+
 @router.post("", response_model=TraceResponse, status_code=201, responses={
     401: {"description": "Invalid or missing API key"},
     403: {"description": "Forbidden — insufficient scope or project mismatch"},
@@ -88,24 +117,14 @@ async def ingest_trace(
         total_latency_ms=body.total_latency_ms,
         failure_kind=body.failure_kind,
         failure_detail=safe_payload.get("failure_detail"),
-        environment=body.environment,
+        environment=body.environment or "development",
         raw_trace=json.dumps(safe_payload),
     )
     db.add(trace)
     await db.flush()
     await db.refresh(trace)
 
-    response = TraceResponse(
-        trace_id=trace.id,
-        project=trace.project,
-        case_id=trace.case_id,
-        status=trace.status,
-        total_latency_ms=trace.total_latency_ms,
-        failure_kind=trace.failure_kind,
-        failure_detail=trace.failure_detail,
-        environment=trace.environment,
-        created_at=trace.created_at,
-    )
+    response = _to_response(trace, safe_payload)
 
     if idempotency_key:
         idempotency_store.set(idempotency_key, "POST:/v1/traces", response)
@@ -132,6 +151,8 @@ async def list_traces(
     limit: int = Query(50, le=500),
     status: str | None = Query(None),
     environment: str | None = Query(None),
+    prompt_name: str | None = Query(None, max_length=255),
+    prompt_version: str | None = Query(None, max_length=64),
     from_: datetime | None = Query(None, alias="from"),
     to: datetime | None = Query(None, alias="to"),
     db: AsyncSession = Depends(get_db),
@@ -165,24 +186,16 @@ async def list_traces(
         q = q.where(TraceRecord.status == status)
     if environment:
         q = q.where(TraceRecord.environment == environment)
+    if prompt_name:
+        q = q.where(TraceRecord.raw_trace.contains(_json_field_token("prompt_name", prompt_name), autoescape=True))
+    if prompt_version:
+        q = q.where(
+            TraceRecord.raw_trace.contains(_json_field_token("prompt_version", prompt_version), autoescape=True)
+        )
     q = q.order_by(TraceRecord.created_at.desc()).limit(limit)
 
     result = await db.execute(q)
-    traces = result.scalars().all()
-    return [
-        TraceResponse(
-            trace_id=t.id,
-            project=t.project,
-            case_id=t.case_id,
-            status=t.status,
-            total_latency_ms=t.total_latency_ms,
-            failure_kind=t.failure_kind,
-            failure_detail=t.failure_detail,
-            environment=t.environment,
-            created_at=t.created_at,
-        )
-        for t in traces
-    ]
+    return [_to_response(t) for t in result.scalars().all()]
 
 
 @router.get("/quota", tags=["traces"], responses={
@@ -237,15 +250,5 @@ async def get_trace(
 
     require_project_access(tier_info, trace.project)
 
-    return TraceDetailResponse(
-        trace_id=trace.id,
-        project=trace.project,
-        case_id=trace.case_id,
-        status=trace.status,
-        total_latency_ms=trace.total_latency_ms,
-        failure_kind=trace.failure_kind,
-        failure_detail=trace.failure_detail,
-        environment=trace.environment,
-        created_at=trace.created_at,
-        raw_trace=json.loads(trace.raw_trace),
-    )
+    raw = json.loads(trace.raw_trace)
+    return TraceDetailResponse(**_to_response(trace, raw).model_dump(), raw_trace=raw)
